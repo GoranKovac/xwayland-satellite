@@ -69,7 +69,7 @@ use wayland_server::{
     Client, DisplayHandle, Resource, WEnum,
 };
 use wl_drm::{client::wl_drm::WlDrm as WlDrmClient, server::wl_drm::WlDrm as WlDrmServer};
-use xcb::x;
+use xcb::{x, Xid};
 
 impl From<&x::CreateNotifyEvent> for WindowDims {
     fn from(value: &x::CreateNotifyEvent) -> Self {
@@ -988,6 +988,11 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
         }
 
         if self.xdg_wm_base.version() < 3 {
+            return;
+        }
+
+        // Fixes issue with yabridge popups not showing up without regressing all other popups
+        if win.attrs.is_popup && !event.above_sibling().is_none() && !event.override_redirect() {
             return;
         }
 
