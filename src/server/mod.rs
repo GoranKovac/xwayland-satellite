@@ -1285,6 +1285,9 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
             }
 
             let (width, height) = (window_data.attrs.dims.width, window_data.attrs.dims.height);
+            if width == 1 && height == 1 {
+                return false;
+            }
             for (_, dimensions) in self.world.query::<&OutputDimensions>().iter() {
                 if dimensions.width == width as i32 && dimensions.height == height as i32 {
                     fullscreen = true;
