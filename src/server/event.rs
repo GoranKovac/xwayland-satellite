@@ -139,8 +139,8 @@ impl Event for SurfaceEvents {
 
                 let needs_server_side_decorations = window_data
                     .attrs
-                    .decorations
-                    .is_none_or(|d| d == Decorations::Server);
+                    .decorations_mode
+                    .is_none_or(|d| d == DecorationsMode::Server);
 
                 if mode == Mode::ServerSide || !needs_server_side_decorations {
                     let mut role = entity.get::<&mut SurfaceRole>().unwrap();

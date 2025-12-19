@@ -7,7 +7,9 @@ pub(crate) mod selection;
 mod tests;
 
 use self::event::*;
-use crate::xstate::{Decorations, MoveResizeDirection, WindowDims, WmHints, WmName, WmNormalHints};
+use crate::xstate::{
+    DecorationsMode, MoveResizeDirection, WindowDims, WmHints, WmName, WmNormalHints,
+};
 use crate::{timespec_from_millis, X11Selection, XConnection};
 use clientside::MyWorld;
 use decoration::{DecorationsData, DecorationsDataSatellite};
@@ -102,7 +104,7 @@ struct WindowAttributes {
     title: Option<WmName>,
     class: Option<String>,
     group: Option<x::Window>,
-    decorations: Option<Decorations>,
+    decorations_mode: Option<DecorationsMode>,
     transient_for: Option<x::Window>,
 }
 
@@ -907,7 +909,7 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
         }
     }
 
-    pub fn set_win_decorations(&mut self, window: x::Window, decorations: Decorations) {
+    pub fn set_win_decorations(&mut self, window: x::Window, decorations_mode: DecorationsMode) {
         let Some(data) = self
             .windows
             .get(&window)
@@ -920,16 +922,16 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
 
         let mut win = data.get::<&mut WindowData>().unwrap();
 
-        if win.attrs.decorations != Some(decorations) {
-            debug!("setting {window:?} decorations {decorations:?}");
+        if win.attrs.decorations_mode != Some(decorations_mode) {
+            debug!("setting {window:?} decorations {decorations_mode:?}");
             if let Some(role) = data.get::<&SurfaceRole>() {
                 if let SurfaceRole::Toplevel(Some(data)) = &*role {
                     if let Some(decoration) = &data.decoration.wl {
-                        decoration.set_mode(decorations.into());
+                        decoration.set_mode(decorations_mode.into());
                     }
                 }
             }
-            win.attrs.decorations = Some(decorations);
+            win.attrs.decorations_mode = Some(decorations_mode);
         }
     }
 
@@ -1375,7 +1377,7 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
             decoration.set_mode(
                 window
                     .attrs
-                    .decorations
+                    .decorations_mode
                     .map_or(zxdg_toplevel_decoration_v1::Mode::ServerSide, From::from),
             );
             decoration
@@ -1391,8 +1393,8 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
         let needs_satellite_decorations = wl_decoration.is_none()
             && window
                 .attrs
-                .decorations
-                .is_none_or(|d| d == Decorations::Server);
+                .decorations_mode
+                .is_none_or(|d| d == DecorationsMode::Server);
         let (sat_decoration, buf) = needs_satellite_decorations
             .then(|| {
                 DecorationsDataSatellite::try_new(

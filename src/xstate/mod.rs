@@ -641,8 +641,8 @@ impl XState {
         }
 
         let motif_hints = motif_wm_hints.resolve()?;
-        if let Some(decorations) = motif_hints.as_ref().and_then(|m| m.decorations) {
-            server_state.set_win_decorations(window, decorations);
+        if let Some(decorations_mode) = motif_hints.as_ref().and_then(|m| m.decorations_mode()) {
+            server_state.set_win_decorations(window, decorations_mode);
         }
 
         let transient_for = self
@@ -689,11 +689,8 @@ impl XState {
         let mut motif_popup = false;
         if let Some(hints) = motif_hints {
             // If MOTIF_WM_HINTS provides no decorations for client assume its a popup
-            let is_client_decoration = hints
-                .decorations
-                .is_some_and(|d| d.eq(&motif::Decorations::Client));
             motif_popup =
-                is_client_decoration && hints.decorations_hints.is_some_and(|d| d.is_empty());
+                hints.is_client_decorated() && hints.decorations.is_some_and(|d| d.is_empty());
             // If the motif hints indicate the user shouldn't be able to do anything
             // to the window at all, it stands to reason it's probably a popup.
             if hints.functions.is_some_and(|f| f.is_empty()) {
@@ -988,8 +985,8 @@ impl XState {
                 let motif_hints =
                     unwrap_or_skip_bad_window_ret!(self.get_motif_wm_hints(window).resolve())
                         .unwrap();
-                if let Some(decorations) = motif_hints.decorations {
-                    server_state.set_win_decorations(window, decorations);
+                if let Some(decorations_mode) = motif_hints.decorations_mode() {
+                    server_state.set_win_decorations(window, decorations_mode);
                 }
             }
             _ => {
@@ -1134,7 +1131,7 @@ impl From<&[u32]> for WmHints {
     }
 }
 
-pub use motif::Decorations;
+pub use motif::DecorationsMode;
 mod motif {
     use super::*;
     // Motif WM hints are incredibly poorly documented, I could only find this header:
@@ -1161,7 +1158,7 @@ mod motif {
     }
 
     bitflags! {
-        pub(super) struct DecorationsHints: u32 {
+        pub(super) struct Decorations: u32 {
             const All = 1;
             const Border = 2;
             const Resizeh = 4;
@@ -1176,7 +1173,6 @@ mod motif {
     pub(super) struct Hints {
         pub(super) functions: Option<Functions>,
         pub(super) decorations: Option<Decorations>,
-        pub(super) decorations_hints: Option<DecorationsHints>,
     }
 
     impl From<&[u32]> for Hints {
@@ -1189,26 +1185,38 @@ mod motif {
                 ret.functions = Some(Functions::from_bits_truncate(value[1]));
             }
             if flags.contains(HintsFlags::Decorations) {
-                ret.decorations = value[2].try_into().ok();
-                ret.decorations_hints = Some(DecorationsHints::from_bits_truncate(value[2]));
+                ret.decorations = Some(Decorations::from_bits_truncate(value[2]));
             }
 
             ret
         }
     }
+    impl Hints {
+        pub fn decorations_mode(&self) -> Option<DecorationsMode> {
+            match self.decorations.as_ref() {
+                Some(decorations) if decorations.is_empty() => Some(DecorationsMode::Client),
+                Some(_) => Some(DecorationsMode::Server),
+                None => Some(DecorationsMode::Server),
+            }
+        }
+
+        pub fn is_client_decorated(&self) -> bool {
+            self.decorations_mode() == Some(DecorationsMode::Client)
+        }
+    }
 
     #[derive(Debug, PartialEq, Eq, Clone, Copy, num_enum::TryFromPrimitive)]
     #[repr(u32)]
-    pub enum Decorations {
+    pub enum DecorationsMode {
         Client = 0,
         Server = 1,
     }
 
-    impl From<Decorations> for zxdg_toplevel_decoration_v1::Mode {
-        fn from(value: Decorations) -> Self {
+    impl From<DecorationsMode> for zxdg_toplevel_decoration_v1::Mode {
+        fn from(value: DecorationsMode) -> Self {
             match value {
-                Decorations::Client => zxdg_toplevel_decoration_v1::Mode::ClientSide,
-                Decorations::Server => zxdg_toplevel_decoration_v1::Mode::ServerSide,
+                DecorationsMode::Client => zxdg_toplevel_decoration_v1::Mode::ClientSide,
+                DecorationsMode::Server => zxdg_toplevel_decoration_v1::Mode::ServerSide,
             }
         }
     }
