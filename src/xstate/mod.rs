@@ -624,6 +624,7 @@ impl XState {
         let name = self.get_net_wm_name(window);
         let class = self.get_wm_class(window);
         let size_hints = self.get_wm_size_hints(window);
+        let wm_hints = self.get_wm_hints(window);
         let motif_wm_hints = self.get_motif_wm_hints(window);
         let mut title = name.resolve()?;
         if title.is_none() {
@@ -639,7 +640,7 @@ impl XState {
         if let Some(hints) = size_hints.resolve()? {
             server_state.set_size_hints(window, hints);
         }
-
+        let wmhints = wm_hints.resolve()?;
         let motif_hints = motif_wm_hints.resolve()?;
         if let Some(decorations) = motif_hints.as_ref().and_then(|m| m.decorations) {
             server_state.set_win_decorations(window, decorations);
@@ -656,7 +657,8 @@ impl XState {
             .resolve()?
             .flatten();
 
-        let is_popup = self.guess_is_popup(window, motif_hints, transient_for.is_some())?;
+        let is_popup =
+            self.guess_is_popup(window, motif_hints, wmhints, transient_for.is_some())?;
         server_state.set_popup(window, is_popup);
         if let Some(parent) = transient_for.and_then(|t| (!is_popup).then_some(t)) {
             server_state.set_transient_for(window, parent);
@@ -684,18 +686,30 @@ impl XState {
         &self,
         window: x::Window,
         motif_hints: Option<motif::Hints>,
+        wm_hints: Option<WmHints>,
         has_transient_for: bool,
     ) -> XResult<bool> {
-        let mut motif_popup = false;
+        // MOTIF_WM_HINTS provides no client decorations (probably popup)
+        let mut no_decoration_popup = false;
+        // WM_HINTS does not accept input focus (probably popup)
+        let mut no_input_focus_popup = false;
         if let Some(hints) = motif_hints {
-            // If MOTIF_WM_HINTS provides no decorations for client assume its a popup
             let is_client_decoration = hints.decorations.is_some_and(|d| d.is_clientside());
-            motif_popup = is_client_decoration && hints.decorations.is_some_and(|d| d.is_empty());
+            // If MOTIF_WM_HINTS provides no decorations for client assume its a popup
+            // most popup windows have:
+            // WM_HINTS(WM_HINTS): Client accepts input or input focus: False
+            // If we get no decoration window + it does not want input or does not have wm_hints assume its a popup
+            // Steam and some top level apps which have no client decorations BUT they want focus
+            // input
+            if is_client_decoration {
+                no_decoration_popup = hints.decorations.is_some_and(|d| d.is_empty());
+                no_input_focus_popup = wm_hints.is_some_and(|h| !h.want_input);
+            }
             // If the motif hints indicate the user shouldn't be able to do anything
             // to the window at all, it stands to reason it's probably a popup.
-            if hints.functions.is_some_and(|f| f.is_empty()) {
-                return Ok(true);
-            }
+            // if hints.functions.is_some_and(|f| f.is_empty()) {
+            //     return Ok(true);
+            // }
         }
 
         let attrs = self
@@ -739,10 +753,10 @@ impl XState {
         for ty in window_types {
             match ty {
                 x if x == self.window_atoms.normal || x == self.window_atoms.dialog => {
-                    is_popup = override_redirect
+                    is_popup = override_redirect || (no_decoration_popup && no_input_focus_popup);
                 }
                 x if x == self.window_atoms.utility => {
-                    is_popup = override_redirect || motif_popup;
+                    is_popup = override_redirect || no_decoration_popup;
                 }
                 x if [
                     self.window_atoms.menu,
@@ -1073,6 +1087,7 @@ bitflags! {
 bitflags! {
     /// https://tronche.com/gui/x/icccm/sec-4.html#s-4.1.2.4
     pub struct WmHintsFlags: u32 {
+        const Input = 1;
         const WindowGroup = 64;
     }
 }
@@ -1115,6 +1130,7 @@ impl From<&[u32]> for WmNormalHints {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct WmHints {
     pub window_group: Option<x::Window>,
+    pub want_input: bool,
 }
 
 impl From<&[u32]> for WmHints {
@@ -1125,6 +1141,9 @@ impl From<&[u32]> for WmHints {
         if flags.contains(WmHintsFlags::WindowGroup) {
             let window = unsafe { x::Window::new(value[8]) };
             ret.window_group = Some(window);
+        }
+        if flags.contains(WmHintsFlags::Input) {
+            ret.want_input = value[1] == 1;
         }
 
         ret
